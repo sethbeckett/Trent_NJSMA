@@ -12,7 +12,6 @@ from cleverhans.compat import reduce_sum, reduce_max, reduce_any
 
 tf_dtype = tf.as_dtype('float32')
 
-
 class SaliencyMapMethod(Attack):
   """
   The Jacobian-based Saliency Map Method (Papernot et al. 2016).
@@ -209,8 +208,16 @@ def jsma_symbolic(x, y_target, model, theta, gamma, clip_min, clip_max):
     other_classes = tf.cast(tf.not_equal(target_class, 1), tf_dtype)
 
     grads_target = reduce_sum(grads * target_class, axis=0)
+    grads_mine = (grads*other_classes)
     grads_other = reduce_sum(grads * other_classes, axis=0)
+    # target class is ignored because other_classes is 0 where   
+    # the target class is. and target class must be greater than
+    # zero. 
+    max_others = reduce_max(grads_mine, 0, True) 
 
+    print(grads_mine.shape)
+    print(max_others.shape)
+    
     # Remove the already-used input features from the search space
     # Subtract 2 times the maximum value from those value so that
     # they won't be picked later
@@ -231,14 +238,14 @@ def jsma_symbolic(x, y_target, model, theta, gamma, clip_min, clip_max):
 
     # Create a mask to only keep features that match conditions
     if increase:
-      scores_mask = ((target_sum > 0) & (other_sum < 0))
+      scores_mask = ((target_sum > 0) & (other_sum < 0 ) & (target_sum > max_others))
     else:
-      scores_mask = ((target_sum < 0) & (other_sum > 0))
+      scores_mask = ((target_sum < 0) & (other_sum > 0) )
 
-    # Create a 2D numpy array of scores for each pair of candidate features
+    #Create a 2D numpy array of scores for each pair of candidate features
     scores = tf.cast(scores_mask, tf_dtype) \
         * (-target_sum * other_sum) * zero_diagonal
-
+    # scores = tf.exp(target_sum, name = 'exp')
     # Extract the best two pixels
     best = tf.argmax(
         tf.reshape(scores, shape=[-1, nb_features * nb_features]), axis=1)
@@ -279,3 +286,5 @@ def jsma_symbolic(x, y_target, model, theta, gamma, clip_min, clip_max):
       parallel_iterations=1)
 
   return x_adv
+  
+  

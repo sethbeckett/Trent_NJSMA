@@ -24,15 +24,17 @@ from cleverhans.utils import pair_visual, grid_visual, AccuracyReport
 from cleverhans.utils_tf import model_eval, model_argmax
 from cleverhans.train import train
 from cleverhans.model_zoo.basic_cnn import ModelBasicCNN
-
+from cleverhans_tutorials.tutorial_models import make_basic_picklable_cnn
+from cleverhans.serial import save
+from cleverhans.serial import load
 FLAGS = flags.FLAGS
 
 VIZ_ENABLED = True
 NB_EPOCHS = 6
 BATCH_SIZE = 128
 LEARNING_RATE = .001
-SOURCE_SAMPLES = 10
-
+SOURCE_SAMPLES = 20
+TRAIN_NEW = 0
 
 def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
                         test_end=10000, viz_enabled=VIZ_ENABLED,
@@ -57,10 +59,17 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   report = AccuracyReport()
 
   # Set TF random seed to improve reproducibility
-  tf.set_random_seed(1234)
+  tf.set_random_seed(24)
 
   # Create TF session and set as Keras backend session
-  sess = tf.Session()
+  #replace
+  num_threads = None
+  if num_threads:
+    config_args = dict(intra_op_parallelism_threads=1)
+  else:
+    config_args = {}
+  sess = tf.Session(config=tf.ConfigProto(**config_args))
+  #with sess = tf.Session()
   print("Created TensorFlow session.")
 
   set_log_level(logging.DEBUG)
@@ -74,7 +83,6 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   # Obtain Image Parameters
   img_rows, img_cols, nchannels = x_train.shape[1:4]
   nb_classes = y_train.shape[1]
-
   # Define input TF placeholder
   x = tf.placeholder(tf.float32, shape=(None, img_rows, img_cols,
                                         nchannels))
@@ -82,7 +90,8 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
 
   nb_filters = 64
   # Define TF model graph
-  model = ModelBasicCNN('model1', nb_classes, nb_filters)
+  #model = ModelBasicCNN('model1', nb_classes, nb_filters)
+  model = make_basic_picklable_cnn()
   preds = model.get_logits(x)
   loss = CrossEntropy(model, smoothing=0.1)
   print("Defined TensorFlow model graph.")
@@ -99,8 +108,14 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   }
   sess.run(tf.global_variables_initializer())
   rng = np.random.RandomState([2017, 8, 30])
-  train(sess, loss, x_train, y_train, args=train_params, rng=rng)
-
+  if TRAIN_NEW == 1:
+    train(sess, loss, x_train, y_train, args=train_params, rng=rng)
+    with sess.as_default():
+        save("test.joblib", model)
+  else:
+    with sess.as_default():
+        model = load("test.joblib")#changed
+        train(sess, loss, x_train, y_train, args=train_params, rng=rng)
   # Evaluate the accuracy of the MNIST model on legitimate test examples
   eval_params = {'batch_size': batch_size}
   accuracy = model_eval(sess, x, y, preds, x_test, y_test, args=eval_params)
@@ -188,11 +203,11 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   report.clean_train_adv_eval = 1. - succ_rate
 
   # Compute the average distortion introduced by the algorithm
-  percent_perturbed = np.mean(perturbations[np.where(perturbations!=0)])
+  percent_perturbed = np.mean(perturbations)
   print('Avg. rate of perturbed features {0:.4f}'.format(percent_perturbed))
 
   # Compute the average distortion introduced for successful samples only
-  percent_perturb_succ = np.mean(perturbations[np.where(perturbations!=0)] * (results[np.where(perturbations!=0)] == 1))
+  percent_perturb_succ = np.mean(perturbations * (results == 1))
   print('Avg. rate of perturbed features for successful '
         'adversarial examples {0:.4f}'.format(percent_perturb_succ))
 
@@ -209,6 +224,7 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
 
 
 def main(argv=None):
+  
   from cleverhans_tutorials import check_installation
   check_installation(__file__)
 
