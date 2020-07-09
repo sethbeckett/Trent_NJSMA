@@ -11,8 +11,9 @@ from cleverhans.attacks.attack import Attack
 from cleverhans.compat import reduce_sum, reduce_max, reduce_any
 
 tf_dtype = tf.as_dtype('float32')
-
+it_count = 0
 class SaliencyMapMethod(Attack):
+ 
   """
   The Jacobian-based Saliency Map Method (Papernot et al. 2016).
   Paper link: https://arxiv.org/pdf/1511.07528.pdf
@@ -34,7 +35,6 @@ class SaliencyMapMethod(Attack):
     """
 
     super(SaliencyMapMethod, self).__init__(model, sess, dtypestr, **kwargs)
-
     self.feedable_kwargs = ('y_target',)
     self.structural_kwargs = [
         'theta', 'gamma', 'clip_max', 'clip_min', 'symbolic_impl'
@@ -215,8 +215,8 @@ def jsma_symbolic(x, y_target, model, theta, gamma, clip_min, clip_max):
     # zero. 
     max_others = reduce_max(grads_mine, 0, True) 
 
-    print(grads_mine.shape)
-    print(max_others.shape)
+    # print(grads_mine.shape)
+    # print(max_others.shape)
     
     # Remove the already-used input features from the search space
     # Subtract 2 times the maximum value from those value so that
@@ -237,11 +237,13 @@ def jsma_symbolic(x, y_target, model, theta, gamma, clip_min, clip_max):
         + tf.reshape(other_tmp, shape=[-1, 1, nb_features])
 
     # Create a mask to only keep features that match conditions
-    if increase:
-      scores_mask = ((target_sum > 0) & (other_sum < 0 ) & (target_sum > max_others))
+    if increase:     
+       #scores_mask = ((target_sum > 0) & (other_sum < 0 ) ) #& (target_sum > max_others))
+       scores_mask = ((target_sum > 0) & (other_sum < 0 ) & (target_sum > max_others))
     else:
       scores_mask = ((target_sum < 0) & (other_sum > 0) )
-
+    global it_count
+    it_count = it_count +1
     #Create a 2D numpy array of scores for each pair of candidate features
     scores = tf.cast(scores_mask, tf_dtype) \
         * (-target_sum * other_sum) * zero_diagonal

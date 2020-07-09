@@ -10,6 +10,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import cv2
+import numpy as np
 import logging
 import numpy as np
 from six.moves import xrange
@@ -27,6 +29,10 @@ from cleverhans.model_zoo.basic_cnn import ModelBasicCNN
 from cleverhans_tutorials.tutorial_models import make_basic_picklable_cnn
 from cleverhans.serial import save
 from cleverhans.serial import load
+
+from random import seed
+from random import randint
+
 FLAGS = flags.FLAGS
 
 VIZ_ENABLED = True
@@ -35,6 +41,10 @@ BATCH_SIZE = 128
 LEARNING_RATE = .001
 SOURCE_SAMPLES = 20
 TRAIN_NEW = 0
+USE_MOD = 0
+SEED = 124
+
+#print("\n\n\n\n\n\n\n", SaliencyMapMethod.it_count, "\n\n\n\n\n")
 
 def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
                         test_end=10000, viz_enabled=VIZ_ENABLED,
@@ -59,7 +69,7 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   report = AccuracyReport()
 
   # Set TF random seed to improve reproducibility
-  tf.set_random_seed(24)
+  tf.set_random_seed(1234)
 
   # Create TF session and set as Keras backend session
   #replace
@@ -89,9 +99,10 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   y = tf.placeholder(tf.float32, shape=(None, nb_classes))
 
   nb_filters = 64
+  
   # Define TF model graph
-  #model = ModelBasicCNN('model1', nb_classes, nb_filters)
   model = make_basic_picklable_cnn()
+                  
   preds = model.get_logits(x)
   loss = CrossEntropy(model, smoothing=0.1)
   print("Defined TensorFlow model graph.")
@@ -106,16 +117,25 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
       'batch_size': batch_size,
       'learning_rate': learning_rate
   }
+  dataset = tf.data.Dataset.from_tensor_slices((tf.reshape(x_train, [60000, 28, 28]), y_train))
+  dataset = dataset.batch(32)
+  val_dataset = tf.data.Dataset.from_tensor_slices((tf.reshape(x_test, [10000, 28, 28]), y_test))
+  val_dataset = val_dataset.batch(32)
+
+  
   sess.run(tf.global_variables_initializer())
   rng = np.random.RandomState([2017, 8, 30])
   if TRAIN_NEW == 1:
-    train(sess, loss, x_train, y_train, args=train_params, rng=rng)
     with sess.as_default():
+        train(sess, loss, x_train, y_train, args=train_params, rng=rng)
         save("test.joblib", model)
   else:
     with sess.as_default():
         model = load("test.joblib")#changed
-        train(sess, loss, x_train, y_train, args=train_params, rng=rng)
+    assert len(model.get_params()) > 0
+    preds = model.get_logits(x)
+    loss = CrossEntropy(model, smoothing=0.1)
+
   # Evaluate the accuracy of the MNIST model on legitimate test examples
   eval_params = {'batch_size': batch_size}
   accuracy = model_eval(sess, x, y, preds, x_test, y_test, args=eval_params)
@@ -138,7 +158,7 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
   # Initialize our array for grid visualization
   grid_shape = (nb_classes, nb_classes, img_rows, img_cols, nchannels)
   grid_viz_data = np.zeros(grid_shape, dtype='f')
-
+    
   # Instantiate a SaliencyMapMethod attack object
   jsma = SaliencyMapMethod(model, sess=sess)
   jsma_params = {'theta': 1., 'gamma': 0.1,
@@ -147,20 +167,23 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
 
   figure = None
   # Loop over the samples we want to perturb into adversarial examples
+  seed(SEED)
   for sample_ind in xrange(0, source_samples):
+    img = randint(0, 10000)
     print('--------------------------------------')
     print('Attacking input %i/%i' % (sample_ind + 1, source_samples))
-    sample = x_test[sample_ind:(sample_ind + 1)]
+    sample = x_test[img: (img + 1)]#sample = x_test[sample_ind:(sample_ind + 1)]
 
     # We want to find an adversarial example for each possible target class
     # (i.e. all classes that differ from the label given in the dataset)
-    current_class = int(np.argmax(y_test[sample_ind]))
+    current_class = int(np.argmax(y_test[img])) #current_class = int(np.argmax(y_test[sample_ind]))
     target_classes = other_classes(nb_classes, current_class)
 
     # For the grid visualization, keep original images along the diagonal
     grid_viz_data[current_class, current_class, :, :, :] = np.reshape(
         sample, (img_rows, img_cols, nchannels))
-
+    tn = 0
+    totc = 0
     # Loop over all target classes
     for target in target_classes:
       print('Generating adv. example for target class %i' % target)
@@ -179,13 +202,115 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
       test_in_reshape = x_test[sample_ind].reshape(-1)
       nb_changed = np.where(adv_x_reshape != test_in_reshape)[0].shape[0]
       percent_perturb = float(nb_changed) / adv_x.reshape(-1).shape[0]
-
+      diff = np.array(adv_x-sample)
+      #print(np.sum(diff))
+      diff = np.reshape(diff,(28,28))
+      diff = diff*255
+      cv2.imwrite("test.png",diff)
+      diff = cv2.imread("test.png")
+      diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+      nieghbors = 0
+      tc = 0
+      for i in range(0,28,1):
+        for j in range(0,28,1):
+            if diff[i,j] > 0:
+                tc = tc + 1
+                totc = totc + 1
+                if i >0 and i <27 and j>0 and j<27:#main grid not edges or corners
+                    if diff[i-1, j-1] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i-1, j] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i-1, j+1] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i, j-1] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i, j+1] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i+1, j-1] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i+1, j] >0:
+                        nieghbors = nieghbors +1
+                    if diff[i+1, j+1] > 0:
+                        nieghbors = nieghbors +1
+                else:
+                    #corners
+                    if i ==0 and j ==0:
+                        if diff[i,j+1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1,j] >0:
+                            nieghbors = nieghbors +1
+                    if i ==27 and j ==0:
+                        if diff[i,j+1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i-1,j] >0:
+                            nieghbors = nieghbors +1
+                    if i ==0 and j ==27:
+                        if diff[i,j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1,j] >0:
+                            nieghbors = nieghbors +1
+                    if i ==27 and j ==27:
+                        if diff[i,j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i-1,j] >0:
+                            nieghbors = nieghbors +1
+                    #edges
+                    if i == 0 and j >0 and j< 27:#left side
+                        if diff[i,j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i,j+1] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i + 1, j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1, j] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1, j+1] > 0:
+                            nieghbors = nieghbors +1
+                    if i == 27 and j >0 and j< 27:#right side
+                        if diff[i,j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i,j+1] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i - 1, j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i-1, j] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i-1, j+1] > 0:
+                            nieghbors = nieghbors +1
+                    if j == 0 and i >0 and i< 27:#top side
+                        if diff[i-1,j] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1,j] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i -1, j+1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i, j+1] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1, j+1] > 0:
+                            nieghbors = nieghbors +1
+                    if j == 27 and i >0 and i< 27:#bot side
+                        if diff[i-1,j] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1,j] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i - 1, j-1] > 0:
+                            nieghbors = nieghbors +1
+                        if diff[i, j-1] >0:
+                            nieghbors = nieghbors +1
+                        if diff[i+1, j-1] > 0:
+                            nieghbors = nieghbors +1
+      
+      # print(tc)      
+      # print(nieghbors)
+      tn = tn + nieghbors
+      # if tc > 0:
+        # print(nieghbors/tc)
       # Display the original and adversarial images side-by-side
       if viz_enabled:
         figure = pair_visual(
             np.reshape(sample, (img_rows, img_cols, nchannels)),
             np.reshape(adv_x, (img_rows, img_cols, nchannels)), figure)
-
       # Add our adversarial example to our grid data
       grid_viz_data[target, current_class, :, :, :] = np.reshape(
           adv_x, (img_rows, img_cols, nchannels))
@@ -193,25 +318,53 @@ def mnist_tutorial_jsma(train_start=0, train_end=60000, test_start=0,
       # Update the arrays for later analysis
       results[target, sample_ind] = res
       perturbations[target, sample_ind] = percent_perturb
-
+      #print(perturbations[target, sample_ind])
+      
   print('--------------------------------------')
-
+  
+  print("average neighbors per modified pixel ", tn/totc)  
   # Compute the number of adversarial examples that were successfully found
   nb_targets_tried = ((nb_classes - 1) * source_samples)
   succ_rate = float(np.sum(results)) / nb_targets_tried
-  print('Avg. rate of successful adv. examples {0:.4f}'.format(succ_rate))
+  print('Avg. rate of successful adv. examples {0:.8f}'.format(succ_rate))
   report.clean_train_adv_eval = 1. - succ_rate
 
   # Compute the average distortion introduced by the algorithm
   percent_perturbed = np.mean(perturbations)
-  print('Avg. rate of perturbed features {0:.4f}'.format(percent_perturbed))
+  
+  s = perturbations.shape
+  myPert = np.empty(0)
+  myResults = np.empty(0)
+  for i in range(s[0]):
+    for j in range(s[1]):
+      if perturbations[i][j] > 0:
+        myPert = np.append(myPert, perturbations[i][j])
+        myResults = np.append(myResults, results[i][j])
+  min_perturbed = np.min(myPert)
+  max_perturbed = np.max(myPert)
+  
+  s2 = myResults.shape
+  final = np.empty(0)
+  for i in range(s2[0]):
+    if myResults[i]>0:
+        final = np.append(final, myPert[i])
+  
+  print('Avg. rate of perturbed features {0:.8f}'.format(percent_perturbed))
+  print('MIN of perturbed features {0:.8f}'.format(min_perturbed))
+  print('MAX of perturbed features {0:.8f}'.format(max_perturbed))
 
   # Compute the average distortion introduced for successful samples only
   percent_perturb_succ = np.mean(perturbations * (results == 1))
+  min_perturb_succ = np.min(final)
+  max_perturb_succ = np.max(final)
   print('Avg. rate of perturbed features for successful '
-        'adversarial examples {0:.4f}'.format(percent_perturb_succ))
-
-  # Close TF session
+        'adversarial examples {0:.8f}'.format(percent_perturb_succ))
+  print('Min of perturbed features for successful '
+        'adversarial examples {0:.8f}'.format(min_perturb_succ))
+  print('Max of perturbed features for successful '
+        'adversarial examples {0:.8f}'.format(max_perturb_succ))
+  
+  #Close TF session
   sess.close()
 
   # Finally, block & display a grid of all the adversarial examples
