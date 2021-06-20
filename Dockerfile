@@ -1,8 +1,11 @@
-FROM ubuntu:14.04
-RUN apt-get update
-RUN apt-get install -y python
-RUN apt-get install -y python-pip
+FROM tensorflow/tensorflow:1.15.5-py3
+RUN apt-get update && apt-get install -y 
+RUN apt-get install python3.5 -y && \
+    apt-get install python3-pip -y
 RUN pip install --upgrade pip
-COPY .setup_vm_and_run_tests.sh /
-RUN chmod +x /.setup_vm_and_run_tests.sh
-CMD ["/.setup_vm_and_run_tests.sh"]
+COPY . /home/seth/cleverhans_3/
+WORKDIR /home/seth/cleverhans_3/cleverhans_tutorials/
+
+
+
+
