@@ -8,7 +8,7 @@ RUN apt-get update &&  DEBIAN_FRONTEND="noninteractive" apt-get install --yes py
 RUN pip install opencv-python
 
 RUN pip install --upgrade pip
-RUN pip install opencv-python && pip install sklearn && pip install joblib
+RUN pip install opencv-python && pip install sklearn && pip install joblib && pip install matplotlib
 
 COPY . /home/usr/cleverhans_3/
 
